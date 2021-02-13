@@ -8,6 +8,7 @@ class DataBase:
     def __init__(self):
         self.connection = connect("data.db")
         self.cursor = self.connection.cursor()
+        self.cursor.execute("CREATE TABLE IF NOT EXISTS reports(date TEXT, reporter TEXT, message TEXT)")
         self.cursor.execute("CREATE TABLE IF NOT EXISTS guilds(id INTEGER PRIMARY KEY, lang TEXT)")
         self.cursor.execute("CREATE TABLE IF NOT EXISTS banwords(guild INTEGER, word TEXT)")
         self.cursor.execute("CREATE TABLE IF NOT EXISTS offenses(guild INTEGER, user INTEGER, date TEXT, duration INTEGER, type INTEGER, reason TEXT)")
@@ -57,9 +58,18 @@ class DataBase:
         return self.cursor
 
     def remove_banword(self, guild_id, banword):
-        self.cursor.execute(f"DELETE FROM banwords WHERE guild={guild_id} AND banword=\"{banword}\"")
-        self.connection.commit()
-        return self.cursor
+        if self.banword_exists(guild_id, banword):
+            self.cursor.execute(f"DELETE FROM banwords WHERE guild={guild_id} AND word=\"{banword}\"")
+            self.connection.commit()
+            return True
+        else:
+            return False
+
+    def banword_exists(self, guild_id, banword):
+        self.cursor.execute(f"SELECT * FROM banwords WHERE guild={guild_id} AND word=\"{banword}\"")
+        for value in self.cursor:
+            return True
+        return False
 
     def get_banwords(self, guild_id):
         banwords = []
@@ -84,3 +94,15 @@ class DataBase:
         for value in self.cursor:
             offenses.append(value)
         return offenses
+
+    def add_report(self, reporter, message):
+        self.cursor.execute(f"INSERT INTO reports (date, reporter, message) VALUES (\"{str(datetime.now())[:16]}\", \"{reporter}\", \"{message}\")")
+        self.connection.commit()
+        return self.cursor
+
+    def get_reports(self):
+        reports = []
+        self.cursor.execute("SELECT * FROM reports")
+        for value in self.cursor:
+            reports.append(value)
+        return reports

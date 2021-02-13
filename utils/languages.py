@@ -23,6 +23,6 @@ class Languages:
 
     def get_path(self, path: str, lang: str = None):
         try:
-            return self.file[self.lang][path]
+            return self.file[(lang, self.lang)[lang is None]][path]
         except KeyError:
             return None

@@ -9,14 +9,48 @@ class Moderation(commands.Cog):
         self.lang = lang
         self.bot = bot
 
+    async def sanction_possible(self, ctx, target: discord.Member):
+        if ctx.author.top_role.position < target.top_role.position or ctx.guild.owner_id == target.id:
+            embed = discord.Embed(title="Action Impossible", description="L'action est impossible à effectuer", color=0xFF0020)
+            embed.add_field(name="Raison", value="Vous ne pouvez pas sanctionner cette personne.", inline=False)
+            await ctx.send(embed=embed)
+            return False
+        member_bot = discord.utils.get(ctx.guild.members, id=self.bot.user.id)
+        if member_bot.top_role.position < target.top_role.position:
+            embed = discord.Embed(title="Action Impossible", description="L'action est impossible à effectuer", color=0xFF0020)
+            embed.add_field(name="Raison", value="Le bot ne peut pas sanctionner cette personne.", inline=False)
+            await ctx.send(embed=embed)
+            return False
+        return True
+
     @commands.Cog.listener()
     async def on_message(self, message):
         if not message.author.bot:
-            for sentence in self.data.get_banwords(message.guild.id):
-                if message.content.find(sentence) != -1:
-                    await message.delete()
+            if isinstance(message.channel, discord.DMChannel):
+                pass
+            else:
+                for sentence in self.data.get_banwords(message.guild.id):
+                    if message.content.lower().find(sentence.lower()) != -1:
+                        await message.delete()
+
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx, error):
+        embed = discord.Embed(title="Action Impossible", description="L'action est impossible à effectuer", color=0xFF0020)
+        if isinstance(error, discord.ext.commands.errors.MissingPermissions):
+            embed.add_field(name="Raison", value="Il vous manque des permissions pour faire ceci !", inline=False)
+            await ctx.send(embed=embed)
+        elif isinstance(error, discord.ext.commands.errors.MemberNotFound):
+            embed.add_field(name="Raison", value="Le membre que vous avez choisi n'existe pas...", inline=False)
+            await ctx.send(embed=embed)
+        elif isinstance(error, discord.ext.commands.errors.ChannelNotFound):
+            embed.add_field(name="Raison", value="Le salon que vous avez choisi n'existe pas...", inline=False)
+            await ctx.send(embed=embed)
+        elif isinstance(error, discord.ext.commands.errors.MissingRequiredArgument):
+            embed.add_field(name="Raison", value="Il manque un argument dans la commande !", inline=False)
+            await ctx.send(embed=embed)
 
     @commands.command()
+    @commands.has_permissions(administrator=True)
     async def addBanword(self, ctx, *, banword):
         self.data.add_banword(ctx.guild.id, banword)
 
@@ -25,14 +59,39 @@ class Moderation(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command()
-    async def getOffenses(self, ctx, user: discord.User):
-        embed = discord.Embed(title="Liste des Infractions", description=f"Liste d'infractions de **{str(user)}**", color=0x00FF4D)
+    @commands.has_permissions(administrator=True)
+    async def removeBanword(self, ctx, *, banword):
+        if self.data.remove_banword(ctx.guild.id, banword):
+            embed = discord.Embed(title="BanWord Retiré", description="Vous avez retiré un banword", color=0x00FF4D)
+            embed.add_field(name="BanWord", value=banword, inline=False)
+            await ctx.send(embed=embed)
+        else:
+            embed = discord.Embed(title="Action Impossible", description="L'action est impossible à effectuer", color=0xFF0020)
+            embed.add_field(name="Raison", value="Ce banword n'existe pas !", inline=False)
+            await ctx.send(embed=embed)
+
+    @commands.command()
+    async def getBanwords(self, ctx):
+        embed = discord.Embed(title="Liste des BanWords", description=f"Liste des BanWords de {ctx.guild}", color=0x8C8D8D)
+        embed_value = ""
+        for banword in self.data.get_banwords(ctx.guild.id):
+            embed_value = embed_value + " \n- " + banword
+        if embed_value != "":
+            embed.add_field(name="BanWords trouvés :", value=embed_value)
+        else:
+            embed.add_field(name="BanWords trouvés :", value="Aucun BanWord trouvé...")
+        await ctx.send(embed=embed)
+
+    @commands.command()
+    @commands.has_permissions(kick_members=True)
+    async def offenses(self, ctx, user: discord.User):
+        embed = discord.Embed(title="Liste des Infractions", description=f"Liste d'infractions de **{str(user)}**", color=0x8C8D8D)
         offenses = 0
         for offense in self.data.get_offenses(ctx.guild.id, user.id):
             offenses += 1
             if offense[4] == 0:
                 offense_type = "Avertissement"
-            if offense[4] == 1:
+            elif offense[4] == 1:
                 offense_type = "Mute"
             elif offense[4] == 2:
                 offense_type = "Expulsion"
@@ -44,7 +103,11 @@ class Moderation(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command()
+    @commands.has_permissions(kick_members=True)
     async def warn(self, ctx, member: discord.Member, *, reason="Aucune raison fournie"):
+
+        if not await self.sanction_possible(ctx, member): return
+
         self.data.add_offense(ctx.guild.id, member.id, 0, 0, reason)
 
         embed = discord.Embed(title="Avertissement Reçu", description="Vous avez reçu un avertissement", color=0x00FF4D)
@@ -58,14 +121,22 @@ class Moderation(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command()
+    @commands.has_permissions(kick_members=True, mute_members=True)
     async def mute(self, ctx, member: discord.Member, *, reason="Aucune raison fournie"):
+
+        if not await self.sanction_possible(ctx, member): return
+
         self.data.add_offense(ctx.guild.id, member.id, 1, 0, reason)
 
         embed = discord.Embed(title="Commande Indisponible", description="Cette commande est indisponible", color=0xFF0020)
         await ctx.send(embed=embed)
 
     @commands.command()
+    @commands.has_permissions(kick_members=True)
     async def kick(self, ctx, member: discord.Member, *, reason="Aucune raison fournie"):
+
+        if not await self.sanction_possible(ctx, member): return
+
         await member.send(f"{member.mention} Vous avez été expulsé du serveur **{ctx.guild}** !")
         await member.kick(reason=reason)
 
@@ -77,7 +148,11 @@ class Moderation(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command()
+    @commands.has_permissions(ban_members=True)
     async def ban(self, ctx, member: discord.Member, *, reason="Aucune raison fournie"):
+
+        if not await self.sanction_possible(ctx, member): return
+
         await member.send(f"{member.mention} Vous avez été banni du serveur **{ctx.guild}** !")
         await member.ban(reason=reason)
 
@@ -89,6 +164,7 @@ class Moderation(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command()
+    @commands.has_permissions(ban_members=True)
     async def unban(self, ctx, user: discord.User, *, reason="Aucune raison fournie"):
         await ctx.guild.unban(user=user, reason=reason)
 
@@ -98,6 +174,7 @@ class Moderation(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command()
+    @commands.has_permissions(manage_channels=True)
     async def purge(self, ctx, messages: int):
         if 1 <= messages <= 100:
             await ctx.channel.purge(limit=messages)
@@ -110,7 +187,8 @@ class Moderation(commands.Cog):
             await ctx.send(embed=embed)
 
     @commands.command()
-    async def setCooldown(self, ctx, channel: discord.TextChannel, delay: int):
+    @commands.has_permissions(manage_channels=True)
+    async def cooldown(self, ctx, channel: discord.TextChannel, delay: int):
         if 0 <= delay <= 300:
             await channel.edit(slowmode_delay=delay)
 
